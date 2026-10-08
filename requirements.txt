@@ -1,0 +1,4 @@
+dotenv
+fastapi
+PyYAML
+uvicorn
