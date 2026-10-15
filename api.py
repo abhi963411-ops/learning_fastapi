@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import uvicorn as uv
 import yaml
 
-app = FastAPI()
+app = FastAPI()uvicorn api:app --host 0.0.0.0 --port $PORT
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
