@@ -70,7 +70,7 @@ async def work(n: int = Query(default=1, ge=0, le=1000000)):
     # Perform n simple units of work.
     sum(range(n))
     return {
-        "email": os.getenv("SERVICE_EMAIL", "service@example.com"),
+        "email": os.getenv("SERVICE_EMAIL", "22f3003081@ds.study.iitm.ac.in"),
         "done": n,
     }
 
