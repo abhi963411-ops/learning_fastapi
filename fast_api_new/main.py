@@ -235,6 +235,7 @@ async def list_orders(
 # are also applied to middleware-generated 429s.
 # ==========================================
 
+
 allowed_origins = [
     "https://app-7wwk32.example.com",
     "https://chatgpt.com",
@@ -248,14 +249,6 @@ app = CORSMiddleware(
     allow_origins=allowed_origins,
     allow_credentials=False,
     allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=[
-        "Content-Type",
-        "Idempotency-Key",
-        "X-Client-Id",
-        "X-Request-ID",
-    ],
-    expose_headers=[
-        "X-Request-ID",
-        "Retry-After",
-    ],
+    allow_headers=["*"],
+    expose_headers=["X-Request-ID", "Retry-After"],
 )
