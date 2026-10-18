@@ -1,9 +1,11 @@
 
+
 import asyncio
 import base64
-import json
 import math
+import os
 import time
+import uuid
 from collections import defaultdict, deque
 from typing import Any
 
@@ -12,36 +14,40 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-app = FastAPI(title="Orders API", version="1.0.0")
 
-# Your assigned values
+app = FastAPI(title="Orders API", version="1.1.0")
+
+
+# ==========================================
+# Assigned configuration
+# ==========================================
+
 TOTAL_ORDERS = 57
-RATE_LIMIT = 15
+
+RATE_LIMIT = 14
 WINDOW_SECONDS = 10
 
+EMAIL = os.getenv("EMAIL", "YOUR_LOGGED_IN_EMAIL")
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
-    expose_headers=["Retry-After"],
-)
+ALLOWED_ORIGIN = "https://app-7wwk32.example.com"
+EXAM_ORIGIN = os.getenv("EXAM_ORIGIN", "").strip()
 
-# Fixed catalog: IDs 1 through 57
+
+# ==========================================
+# In-memory state
+# ==========================================
+
 CATALOG = [
     {"id": i, "product": f"Product {i}", "quantity": 1}
     for i in range(1, TOTAL_ORDERS + 1)
 ]
 
-# In-memory state (suitable for a single running instance)
 idempotency_store: dict[str, dict[str, Any]] = {}
 created_orders: dict[str, dict[str, Any]] = {}
 next_created_id = 1
+
 idempotency_lock = asyncio.Lock()
 
-# Each client has its own rolling 10-second window.
 client_requests = defaultdict(deque)
 rate_limit_lock = asyncio.Lock()
 
@@ -52,9 +58,13 @@ class OrderRequest(BaseModel):
     details: dict[str, Any] = Field(default_factory=dict)
 
 
+# ==========================================
+# Middleware 1: Per-client rate limiter
+# ==========================================
+
 @app.middleware("http")
 async def per_client_rate_limit(request: Request, call_next):
-    # Let CORS preflight requests through without consuming the quota.
+    # OPTIONS preflight requests do not consume the quota.
     if request.method == "OPTIONS":
         return await call_next(request)
 
@@ -64,14 +74,18 @@ async def per_client_rate_limit(request: Request, call_next):
     async with rate_limit_lock:
         timestamps = client_requests[client_id]
 
-        # Remove requests outside the rolling 10-second window.
+        # Remove timestamps outside the rolling 10-second window.
         while timestamps and now - timestamps[0] >= WINDOW_SECONDS:
             timestamps.popleft()
 
         if len(timestamps) >= RATE_LIMIT:
             retry_after = max(
-                1, math.ceil(WINDOW_SECONDS - (now - timestamps[0]))
+                1,
+                math.ceil(
+                    WINDOW_SECONDS - (now - timestamps[0])
+                ),
             )
+
             return JSONResponse(
                 status_code=429,
                 content={"detail": "Rate limit exceeded"},
@@ -82,6 +96,41 @@ async def per_client_rate_limit(request: Request, call_next):
 
     return await call_next(request)
 
+
+# ==========================================
+# Middleware 2: Request context propagation
+# ==========================================
+
+@app.middleware("http")
+async def request_context(request: Request, call_next):
+    request_id = (
+        request.headers.get("X-Request-ID")
+        or str(uuid.uuid4())
+    )
+
+    request.state.request_id = request_id
+
+    response = await call_next(request)
+
+    response.headers["X-Request-ID"] = request_id
+    return response
+
+
+# ==========================================
+# GET /ping
+# ==========================================
+
+@app.get("/ping")
+async def ping(request: Request):
+    return {
+        "email": EMAIL,
+        "request_id": request.state.request_id,
+    }
+
+
+# ==========================================
+# Existing Orders API endpoints
+# ==========================================
 
 @app.get("/")
 async def root():
@@ -102,7 +151,8 @@ async def healthz():
 async def create_order(
     body: OrderRequest | None = None,
     idempotency_key: str | None = Header(
-        default=None, alias="Idempotency-Key"
+        default=None,
+        alias="Idempotency-Key",
     ),
 ):
     global next_created_id
@@ -114,7 +164,6 @@ async def create_order(
         )
 
     async with idempotency_lock:
-        # Return the original order for a repeated key.
         if idempotency_key in idempotency_store:
             return idempotency_store[idempotency_key]
 
@@ -126,13 +175,16 @@ async def create_order(
             "quantity": payload.quantity,
             "details": payload.details,
         }
+
         next_created_id += 1
 
         idempotency_store[idempotency_key] = order
         created_orders[order["id"]] = order
 
-        # Return 201 for the first request.
-        return JSONResponse(status_code=201, content=order)
+        return JSONResponse(
+            status_code=201,
+            content=order,
+        )
 
 
 @app.get("/orders")
@@ -140,25 +192,32 @@ async def list_orders(
     limit: int = Query(default=10, ge=1, le=100),
     cursor: str | None = Query(default=None),
 ):
-    # A cursor represents the next zero-based catalog position.
     if cursor is None:
         start = 0
     else:
         try:
             decoded = base64.urlsafe_b64decode(
-                cursor.encode("ascii") + b"=" * (-len(cursor) % 4)
+                cursor.encode("ascii")
+                + b"=" * (-len(cursor) % 4)
             )
             start = int(decoded.decode("ascii"))
         except Exception:
-            raise HTTPException(status_code=400, detail="Invalid cursor")
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid cursor",
+            )
 
         if start < 0 or start > TOTAL_ORDERS:
-            raise HTTPException(status_code=400, detail="Invalid cursor")
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid cursor",
+            )
 
     end = min(start + limit, TOTAL_ORDERS)
     items = CATALOG[start:end]
 
     next_cursor = None
+
     if end < TOTAL_ORDERS:
         next_cursor = base64.urlsafe_b64encode(
             str(end).encode("ascii")
@@ -168,3 +227,32 @@ async def list_orders(
         "items": items,
         "next_cursor": next_cursor,
     }
+
+
+# ==========================================
+# Middleware 3: Scoped CORS
+# Wrap the entire application so CORS headers
+# are also applied to middleware-generated 429s.
+# ==========================================
+
+allowed_origins = [ALLOWED_ORIGIN]
+
+if EXAM_ORIGIN and EXAM_ORIGIN not in allowed_origins:
+    allowed_origins.append(EXAM_ORIGIN)
+
+app = CORSMiddleware(
+    app=app,
+    allow_origins=allowed_origins,
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=[
+        "Content-Type",
+        "Idempotency-Key",
+        "X-Client-Id",
+        "X-Request-ID",
+    ],
+    expose_headers=[
+        "X-Request-ID",
+        "Retry-After",
+    ],
+)
