@@ -238,6 +238,7 @@ async def list_orders(
 
 allowed_origins = [
     "https://app-7wwk32.example.com",
+    "https://exam.sanand.workers.dev",
     "https://chatgpt.com",
 ]
 
