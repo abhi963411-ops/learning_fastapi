@@ -235,7 +235,10 @@ async def list_orders(
 # are also applied to middleware-generated 429s.
 # ==========================================
 
-allowed_origins = [ALLOWED_ORIGIN]
+allowed_origins = [
+    "https://app-7wwk32.example.com",
+    "https://chatgpt.com",
+]
 
 if EXAM_ORIGIN and EXAM_ORIGIN not in allowed_origins:
     allowed_origins.append(EXAM_ORIGIN)
