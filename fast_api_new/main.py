@@ -20,14 +20,15 @@ RATE_LIMIT = 15
 WINDOW_SECONDS = 10
 
 # Allow browser-based grading from any origin.
-app.add_middleware(
-    CORSMiddleware,
+app = CORSMiddleware(
+    app,
     allow_origins=["*"],
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
     expose_headers=["Retry-After"],
 )
+
 
 # Fixed catalog: IDs 1 through 57
 CATALOG = [
