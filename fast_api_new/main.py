@@ -254,29 +254,3 @@ app = CORSMiddleware(
     expose_headers=["X-Request-ID", "Retry-After"],
 )
 
-
-
-@app.get("/ollama-stream-results")
-def ollama_stream_results():
-    result = {
-        "A": {
-            "text": "Report job-16b1ced0: café\nReady ✓",
-            "complete": True,
-            "error": None
-        },
-        "B": {
-            "text": "Partial job-16b1ced0",
-            "complete": False,
-            "error": None
-        },
-        "C": {
-            "text": "Draft job-16b1ced0",
-            "complete": False,
-            "error": "model unloaded"
-        }
-    }
-
-    return JSONResponse(
-        content=result,
-        ensure_ascii=False
-    )
